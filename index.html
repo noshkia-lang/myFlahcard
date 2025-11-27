@@ -1,15 +1,229 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="fa">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<link rel="manifest" href="manifest.json" />
-<title>Flashcards PWA</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>فلش‌کارد SM-2</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#2b7cff">
+<style>
+body { font-family: Tahoma, Arial; direction: rtl; padding: 18px; max-width:900px; margin:0 auto; background:#f6f7fb; color:#222;}
+h1 { text-align:center; }
+.row { display:flex; gap:12px; margin-bottom:12px; flex-wrap:wrap; }
+.col { flex:1; min-width:220px; }
+input, textarea, button { font:inherit; padding:8px; border-radius:6px; border:1px solid #ccc; width:100%; box-sizing:border-box; }
+button { cursor:pointer; background:#2b7cff; color:#fff; border:0; }
+button.ghost { background:#fff; color:#2b7cff; border:1px solid #2b7cff; }
+.deck, .card { padding:10px; background:#fff; border-radius:8px; box-shadow:0 1px 3px rgba(0,0,0,0.06); margin-bottom:8px; }
+.controls { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
+.hidden { display:none; }
+.center { text-align:center; }
+.small { font-size:13px; color:#666; }
+footer { text-align:center; margin-top:18px; color:#666; font-size:13px; }
+#studyArea { display:flex; flex-direction:column; align-items:center; justify-content:center; margin-top:18px; }
+#question { font-size:20px; margin-bottom:12px; }
+#answer { font-size:18px; margin-top:12px; }
+#ratingBtns button { width:48px; }
+.controls .ghost { background:#fff; color:#2b7cff; border:1px solid #2b7cff; }
+.deck-actions { margin-top:6px; display:flex; gap:6px; flex-wrap:wrap; }
+</style>
 </head>
 <body>
-<h1>Flashcards App</h1>
+<h1>فلش‌کارد SM-2</h1>
+
+<div id="main">
+  <div class="row">
+    <div class="col">
+      <h3>دک‌ها</h3>
+      <div id="decksList"></div>
+      <input id="newDeckName" placeholder="اسم دِک جدید..." />
+      <div class="row">
+        <button id="createDeckBtn">ایجاد دِک</button>
+      </div>
+    </div>
+
+    <div class="col">
+      <h3>دِک انتخاب‌شده</h3>
+      <div id="selectedDeckInfo" class="small">هیچ دِکی انتخاب نشده.</div>
+      <h4>افزودن کارت</h4>
+      <input id="qInput" placeholder="سوال"/>
+      <textarea id="aInput" rows="3" placeholder="پاسخ"></textarea>
+      <div class="row">
+        <button id="addCardBtn">افزودن کارت</button>
+        <button id="studyBtn" class="ghost">شروع مرور</button>
+      </div>
+      <div id="cardsList"></div>
+    </div>
+  </div>
+</div>
+
+<div id="studyArea" class="hidden">
+  <div id="question"></div>
+  <button id="showAnswerBtn" class="ghost">نمایش پاسخ</button>
+  <div id="answer" class="hidden"></div>
+  <div id="ratingBtns" class="controls hidden" style="margin-top:12px;">
+    <button data-score="0">0</button>
+    <button data-score="1">1</button>
+    <button data-score="2">2</button>
+    <button data-score="3">3</button>
+    <button data-score="4">4</button>
+    <button data-score="5">5</button>
+  </div>
+  <button id="exitStudy" class="ghost" style="margin-top:12px;">خروج از مرور</button>
+</div>
+
+<footer>SM-2 algorithm powered — آفلاین هم کار می‌کند</footer>
+
 <script>
-alert("PWA Ready!");
+const LS_KEY='flash_decks_v2';
+function uid(){return Math.random().toString(36).slice(2,9);}
+function daysToMs(d){return d*24*60*60*1000;}
+
+let data = loadData();
+let selectedDeckId=null;
+let studyQueue=[];
+let currentCard=null;
+
+function loadData(){
+  const raw = localStorage.getItem(LS_KEY);
+  if(!raw){ const init={decks:[]}; localStorage.setItem(LS_KEY, JSON.stringify(init)); return init; }
+  try{ return JSON.parse(raw); } catch(e){ console.error(e); const init={decks:[]}; localStorage.setItem(LS_KEY, JSON.stringify(init)); return init; }
+}
+function saveData(){ localStorage.setItem(LS_KEY, JSON.stringify(data)); render(); }
+
+function render(){
+  renderDecks();
+  renderSelectedDeckInfo();
+  renderCardsList();
+}
+
+function renderDecks(){
+  const el=document.getElementById('decksList');
+  el.innerHTML='';
+  data.decks.forEach(d=>{
+    const div=document.createElement('div');
+    div.className='deck';
+    div.innerHTML=`<strong>${escapeHtml(d.name)}</strong><div class="small">کارت‌ها: ${d.cards.length}</div>`;
+    const actions=document.createElement('div'); actions.className='deck-actions';
+    const selectBtn=document.createElement('button'); selectBtn.textContent='انتخاب'; selectBtn.className='ghost';
+    selectBtn.onclick=()=>{selectedDeckId=d.id; render();};
+    const renameBtn=document.createElement('button'); renameBtn.textContent='تغییر نام'; renameBtn.className='ghost';
+    renameBtn.onclick=()=>{ const v=prompt('اسم جدید دِک:',d.name); if(v!=null){ d.name=v; saveData(); } };
+    const delBtn=document.createElement('button'); delBtn.textContent='حذف'; delBtn.className='ghost';
+    delBtn.onclick=()=>{ if(confirm('حذف دِک و همه کارت‌های آن؟')){ data.decks=data.decks.filter(x=>x.id!==d.id); if(selectedDeckId===d.id) selectedDeckId=null; saveData(); } };
+    actions.appendChild(selectBtn); actions.appendChild(renameBtn); actions.appendChild(delBtn);
+    div.appendChild(actions);
+    if(selectedDeckId===d.id) div.style.border='2px solid #2b7cff';
+    el.appendChild(div);
+  });
+}
+
+function renderSelectedDeckInfo(){
+  const el=document.getElementById('selectedDeckInfo');
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  if(!deck){ el.innerHTML='هیچ دِکی انتخاب نشده.'; return; }
+  const due=deck.cards.filter(c=>c.due && c.due<=Date.now()).length;
+  el.innerHTML=`<strong>${escapeHtml(deck.name)}</strong> — ${deck.cards.length} کارت — ${due} آماده مرور`;
+}
+
+function renderCardsList(){
+  const el=document.getElementById('cardsList');
+  el.innerHTML='';
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  if(!deck) return;
+  deck.cards.forEach(c=>{
+    const d=document.createElement('div');
+    d.className='card';
+    d.innerHTML=`<div><strong>Q:</strong> ${escapeHtml(c.q)}</div>
+      <div class="small"><strong>A:</strong> ${escapeHtml(c.a)}</div>
+      <div class="small">EF:${(c.easiness||2.5).toFixed(2)} • interval:${c.interval||0} • repetition:${c.repetition||0}</div>`;
+    const editBtn=document.createElement('button'); editBtn.textContent='ویرایش'; editBtn.className='ghost';
+    editBtn.onclick=()=>{ editCard(c.id); };
+    const delBtn=document.createElement('button'); delBtn.textContent='حذف'; delBtn.className='ghost';
+    delBtn.onclick=()=>{ deleteCard(c.id); };
+    d.appendChild(editBtn); d.appendChild(delBtn);
+    el.appendChild(d);
+  });
+}
+
+function addDeck(name){ if(!name) name='دِک '+(data.decks.length+1); data.decks.push({id:uid(),name,cards:[]}); saveData(); }
+function addCardToSelected(q,a){
+  if(!selectedDeckId){ alert('یک دِک انتخاب کن'); return; }
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  deck.cards.push({id:uid(),q:q||'سوال',a:a||'پاسخ',easiness:2.5,interval:0,repetition:0,due:Date.now()});
+  saveData();
+}
+function editCard(cardId){
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  const c=deck.cards.find(x=>x.id===cardId);
+  const q=prompt('ویرایش سوال:',c.q); if(q==null) return;
+  const a=prompt('ویرایش پاسخ:',c.a); if(a==null) return;
+  c.q=q; c.a=a; saveData();
+}
+function deleteCard(cardId){
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  deck.cards=deck.cards.filter(c=>c.id!==cardId);
+  saveData();
+}
+
+function sm2Update(card,quality){
+  if(quality<3){ card.repetition=0; card.interval=1; }
+  else {
+    card.repetition=(card.repetition||0)+1;
+    if(card.repetition===1) card.interval=1;
+    else if(card.repetition===2) card.interval=6;
+    else card.interval=Math.round(card.interval*(card.easiness||2.5));
+    let ef=(card.easiness||2.5)+(0.1-(5-quality)*(0.08+(5-quality)*0.02));
+    card.easiness=Math.max(ef,1.3);
+  }
+  card.due=Date.now()+daysToMs(card.interval);
+}
+
+function buildStudyQueue(){
+  studyQueue=[];
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  if(!deck) return;
+  const now=Date.now();
+  studyQueue=deck.cards.filter(c=>c.due && c.due<=now).sort((a,b)=>(a.due||0)-(b.due||0));
+  if(studyQueue.length===0){ alert('کارت آماده‌ای برای مرور نیست.'); return; }
+  document.getElementById('studyArea').classList.remove('hidden');
+  showNextCard();
+}
+function showNextCard(){
+  if(studyQueue.length===0){ currentCard=null; document.getElementById('studyArea').classList.add('hidden'); return; }
+  currentCard=studyQueue.shift();
+  document.getElementById('question').textContent=currentCard.q;
+  document.getElementById('answer').textContent=currentCard.a;
+  document.getElementById('answer').classList.add('hidden');
+  document.getElementById('showAnswerBtn').classList.remove('hidden');
+  document.getElementById('ratingBtns').classList.add('hidden');
+}
+function rateCurrentCard(score){
+  if(!currentCard) return;
+  const deck=data.decks.find(x=>x.id===selectedDeckId);
+  const card=deck.cards.find(c=>c.id===currentCard.id);
+  sm2Update(card,parseInt(score,10));
+  saveData();
+  showNextCard();
+}
+
+document.getElementById('createDeckBtn').onclick=()=>{ addDeck(document.getElementById('newDeckName').value.trim()); document.getElementById('newDeckName').value=''; };
+document.getElementById('addCardBtn').onclick=()=>{ addCardToSelected(document.getElementById('qInput').value.trim(),document.getElementById('aInput').value.trim()); document.getElementById('qInput').value=''; document.getElementById('aInput').value=''; };
+document.getElementById('studyBtn').onclick=()=>{ buildStudyQueue(); };
+document.getElementById('showAnswerBtn').onclick=()=>{ document.getElementById('answer').classList.remove('hidden'); document.getElementById('showAnswerBtn').classList.add('hidden'); document.getElementById('ratingBtns').classList.remove('hidden'); };
+document.getElementById('ratingBtns').addEventListener('click',(e)=>{ const btn=e.target.closest('button[data-score]'); if(!btn) return; rateCurrentCard(btn.getAttribute('data-score')); });
+document.getElementById('exitStudy').onclick=()=>{ document.getElementById('studyArea').classList.add('hidden'); };
+function escapeHtml(s){ return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+render();
+
+// Service Worker ثبت
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>{ 
+    navigator.serviceWorker.register('./service-worker.js')
+      .catch(e=>console.warn(e)); 
+  });
+}
 </script>
 </body>
 </html>
